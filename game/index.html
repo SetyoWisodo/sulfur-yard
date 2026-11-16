@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sulfur Yard — a three.js tactical FPS</title>
+<style>
+  :root {
+    --canvas: #1d2b33;
+    --surface: #20262b;
+    --hairline: #3a4148;
+    --ink: #ece7db;
+    --muted: #9aa5a0;
+    --accent: #ffb347;
+    --ember: #ff7a26;
+    --ash: #7fb3b0;
+    --red: #e5484d;
+    --green: #7fce6e;
+    --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-readout: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--canvas); color: var(--ink); font-family: var(--font-ui); }
+  #game, #game canvas { position: fixed; inset: 0; display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); --gap: 4px; }
+  #crosshair i { position: absolute; background: var(--ink); opacity: .9; }
+  #crosshair i:nth-child(1) { left: 10px; top: calc(0px - var(--gap)); width: 2px; height: 7px; }
+  #crosshair i:nth-child(2) { left: 10px; bottom: calc(0px - var(--gap)); width: 2px; height: 7px; }
+  #crosshair i:nth-child(3) { top: 10px; left: calc(0px - var(--gap)); height: 2px; width: 7px; }
+  #crosshair i:nth-child(4) { top: 10px; right: calc(0px - var(--gap)); height: 2px; width: 7px; }
+  #crosshair::after { content: ''; position: absolute; left: 10px; top: 10px; width: 2px; height: 2px; background: var(--accent); }
+
+  #hitmarker { position: fixed; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%) rotate(45deg); opacity: 0; }
+  #hitmarker.on { opacity: 1; }
+  #hitmarker.kill i { background: var(--red); }
+  #hitmarker i { position: absolute; background: var(--accent); }
+  #hitmarker i:nth-child(1) { left: 12px; top: 0; width: 2px; height: 8px; }
+  #hitmarker i:nth-child(2) { left: 12px; bottom: 0; width: 2px; height: 8px; }
+  #hitmarker i:nth-child(3) { top: 12px; left: 0; height: 2px; width: 8px; }
+  #hitmarker i:nth-child(4) { top: 12px; right: 0; height: 2px; width: 8px; }
+
+  #damage-flash { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 120px 40px rgba(229, 72, 77, .55); opacity: 0; }
+  #damage-flash.on { opacity: 1; }
+  #flash-overlay { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .6s linear; }
+  #flash-overlay.on { opacity: .9; transition: opacity .05s linear; }
+
+  #topbar { position: fixed; top: 16px; left: 0; right: 0; display: flex; gap: 18px; align-items: baseline; justify-content: center; font-family: var(--font-readout); font-size: 15px; white-space: nowrap; }
+  #timer-value { font-size: 26px; color: var(--ink); }
+  #timer-value.buy { color: var(--accent); }
+  #score-value { color: var(--muted); }
+  #score-value b { color: var(--ink); font-weight: 500; }
+  #money-value { color: var(--accent); }
+
+  #charge-status { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); font-family: var(--font-readout); font-size: 14px; letter-spacing: .08em; color: var(--accent); background: rgba(32, 38, 43, .8); border: 1px solid var(--hairline); padding: 6px 12px; }
+  #charge-status.danger { color: var(--red); border-color: var(--red); }
+
+  #killfeed { position: fixed; top: 16px; right: 20px; display: grid; gap: 4px; justify-items: end; font-size: 13px; font-family: var(--font-readout); }
+  #killfeed div { background: rgba(32, 38, 43, .8); padding: 3px 8px; border-right: 3px solid var(--muted); }
+  #killfeed .feed-kill { border-right-color: var(--ember); }
+  #killfeed .feed-plant { border-right-color: var(--accent); }
+  #killfeed .feed-death { border-right-color: var(--red); }
+  #killfeed .feed-radio { border-right-color: var(--ash); color: var(--ash); }
+
+  /* Minimap (cycle 11, Kilnyard comparison): top-left under the topbar,
+     clear of the centred score/timer/money at every width. 64 x 48 m yard
+     at 148 x 111 px — the same 2.3125 px/m both axes, no distortion. */
+  #minimap { position: fixed; left: 16px; top: 56px; width: 148px; height: 111px; background: rgba(32, 38, 43, .85); border: 1px solid var(--hairline); }
+
+  #health { position: fixed; left: 32px; bottom: 24px; font-family: var(--font-readout); }
+  #health-value { font-size: 40px; line-height: 1; }
+  #armour-value { font-size: 20px; line-height: 1; color: var(--accent); margin-left: 6px; }
+  #health-bar-wrap { width: 160px; height: 6px; background: var(--hairline); margin-top: 6px; }
+  #health-bar { height: 100%; width: 100%; background: var(--green); }
+  #health-bar.low { background: var(--red); }
+
+  #ammo { position: fixed; right: 32px; bottom: 24px; text-align: right; font-family: var(--font-readout); }
+  #ammo-mag { font-size: 52px; line-height: 1; }
+  #ammo-reserve { font-size: 15px; color: var(--muted); }
+  #ammo.empty #ammo-mag { color: var(--red); }
+  #weapon-name { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  #grenade-count { font-size: 12px; color: var(--muted); }
+
+  #hint { position: fixed; left: 50%; bottom: 110px; transform: translateX(-50%); font-family: var(--font-readout); font-size: 14px; color: var(--accent); background: rgba(32, 38, 43, .8); padding: 6px 12px; }
+
+  #round-banner { position: fixed; left: 50%; top: 34%; transform: translateX(-50%); font-size: 34px; font-weight: 600; letter-spacing: .06em; color: var(--accent); text-shadow: 0 2px 18px rgba(0,0,0,.7); white-space: nowrap; }
+
+  #buy-menu { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(460px, 92vw); background: rgba(32, 38, 43, .96); border: 1px solid var(--hairline); padding: 20px 24px; pointer-events: auto; }
+  #buy-menu[hidden] { display: none; }
+  #buy-menu h2 { margin: 0 0 4px; font-size: 20px; letter-spacing: .04em; }
+  #buy-menu p { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+  #buy-money { color: var(--accent); font-family: var(--font-readout); }
+  .buy-row { display: flex; gap: 10px; align-items: baseline; padding: 8px 6px; border-bottom: 1px solid var(--hairline); font-size: 15px; }
+  .buy-row.bought { background: rgba(127, 206, 110, .15); }
+  .buy-row.poor { background: rgba(229, 72, 77, .15); }
+  /* Persistent buy states (cycle 12): Owned reads green, Too expensive red. */
+  .buy-row.owned { background: rgba(127, 206, 110, .10); }
+  .buy-row.owned .buy-state { color: var(--green); }
+  .buy-row.poor .buy-state { color: var(--red); }
+  .buy-row.poor .buy-price { color: var(--red); }
+  .buy-state { font-family: var(--font-readout); font-size: 12px; color: var(--muted); min-width: 92px; text-align: right; }
+  .buy-key { font-family: var(--font-readout); color: var(--accent); border: 1px solid var(--hairline); padding: 1px 7px; font-size: 12px; }
+  .buy-name { flex: 1; }
+  .buy-price { font-family: var(--font-readout); color: var(--muted); }
+
+  .overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(29, 43, 51, .88); pointer-events: auto; overflow-y: auto; }
+  .overlay[hidden] { display: none; }
+  .panel { width: min(480px, 100%); padding: 32px; background: var(--surface); border: 1px solid var(--hairline); }
+  .panel h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: -0.02em; }
+  .panel h1 span { color: var(--accent); }
+  .panel p { margin: 0 0 24px; font-size: 15px; line-height: 1.55; color: var(--muted); }
+  /* End-of-match scoreboard (cycle 11, Kilnyard comparison): K / D /
+     headshot % / damage per player, Ember then Ash, the player's row
+     highlighted. Compact so it fits a 360 px-tall viewport with scroll. */
+  #scoreboard { margin: -8px 0 20px; }
+  #scoreboard table { width: 100%; border-collapse: collapse; font-family: var(--font-readout); font-size: 13px; }
+  #scoreboard th, #scoreboard td { padding: 4px 6px; text-align: right; }
+  #scoreboard th:first-child, #scoreboard td:first-child { text-align: left; }
+  #scoreboard thead th { color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--hairline); }
+  #scoreboard .team-row td { color: var(--muted); font-size: 11px; letter-spacing: .12em; padding-top: 10px; }
+  #scoreboard tr.me td { color: var(--accent); font-weight: 600; }
+  #play { font: inherit; font-weight: 600; padding: 12px 18px; border: 1px solid var(--accent); background: var(--accent); color: var(--canvas); cursor: pointer; }
+  #play:hover { background: var(--ink); border-color: var(--ink); }
+  .keys { margin: 24px 0 0; padding: 0; list-style: none; display: grid; gap: 7px; font-size: 13px; color: var(--muted); }
+  .keys kbd { min-width: 24px; padding: 2px 6px; border: 1px solid var(--hairline); font-family: var(--font-readout); font-size: 12px; color: var(--ink); text-align: center; }
+  .keys .key { white-space: nowrap; }
+
+  /* Short viewports (cycle 12): eleven buy rows must fit a 360 px-tall
+     window, so the menu compacts instead of overflowing. */
+  @media (max-height: 500px) {
+    #buy-menu { padding: 12px 16px; }
+    #buy-menu h2 { font-size: 16px; }
+    #buy-menu p { margin: 0 0 8px; }
+    .buy-row { padding: 2px 6px; font-size: 12px; }
+    .buy-state { min-width: 78px; }
+  }
+
+  /* Narrow windows (cycle 7): the old centred topbar wrapped its score
+     text and the killfeed overlapped the timer/money. The bar is now
+     full-width and no-wrap, and below 1100 px the killfeed drops above
+     the ammo block so nothing shares a band — the longest feed entries
+     are ~300 px wide, so the collision starts well above 800 px. */
+  @media (max-width: 1100px) {
+    #topbar { font-size: 13px; gap: 10px; }
+    #timer-value { font-size: 20px; }
+    #killfeed { top: auto; bottom: 140px; font-size: 12px; }
+    #minimap { width: 110px; height: 83px; }
+    #charge-status { font-size: 12px; }
+    #round-banner { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="hud" aria-hidden="true">
+  <div id="damage-flash"></div>
+  <div id="flash-overlay"></div>
+  <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+  <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+  <div id="topbar">
+    <span id="score-value">EMBER 0 — 0 ASH · ROUND 1</span>
+    <span id="timer-value">0:15</span>
+    <span id="money-value">$800</span>
+  </div>
+  <div id="charge-status" hidden></div>
+  <div id="killfeed"></div>
+  <canvas id="minimap" width="148" height="111"></canvas>
+  <div id="health"><span id="health-value">100</span><span id="armour-value"></span><div id="health-bar-wrap"><div id="health-bar"></div></div></div>
+  <div id="ammo"><span id="ammo-mag">12</span><span id="ammo-reserve">/ 36</span><div id="weapon-name">P-9 Sidearm</div><div id="grenade-count">Frag 0 · Flash 0</div></div>
+  <div id="hint" hidden></div>
+  <div id="round-banner" hidden></div>
+  <div id="buy-menu" hidden>
+    <h2>BUY MENU <span id="buy-money">$800</span></h2>
+    <p>Buy phase — press a number key to buy. Press B to close.</p>
+    <div id="buy-list"></div>
+  </div>
+</div>
+<div id="overlay" class="overlay">
+  <section class="panel" role="dialog" aria-modal="true" aria-labelledby="overlay-title">
+    <h1 id="overlay-title">SULFUR <span>YARD</span></h1>
+    <p id="overlay-copy">Ember attacks. Plant the charge at Crusher (A) or Kiln (B) — or eliminate Ash. First to 7 rounds takes the yard; sides swap at halftime, then you defend it.</p>
+    <div id="scoreboard"></div>
+    <button id="play" type="button">Click to play</button>
+    <ul class="keys">
+      <li><span class="key"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</span> &nbsp; <span class="key"><kbd>Mouse</kbd> Look</span> &nbsp; <span class="key"><kbd>Click</kbd> Fire</span></li>
+      <li><span class="key"><kbd>R</kbd> Reload</span> &nbsp; <span class="key"><kbd>Ctrl</kbd> Crouch</span> &nbsp; <span class="key"><kbd>B</kbd> Buy menu</span> &nbsp; <span class="key"><kbd>E</kbd> Plant / Defuse (hold)</span></li>
+      <li><span class="key"><kbd>G</kbd> Frag grenade</span> &nbsp; <span class="key"><kbd>F</kbd> Flash grenade</span> &nbsp; <span class="key"><kbd>V</kbd> Smoke grenade</span> &nbsp; <span class="key"><kbd>M</kbd> Mute</span></li>
+      <li><span class="key"><kbd>K</kbd> Defuse kit (buy menu)</span></li>
+    </ul>
+  </section>
+</div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
